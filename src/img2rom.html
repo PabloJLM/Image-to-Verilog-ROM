@@ -1,1 +1,599 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imagen a ROM VGA (Tiny Tapeout)</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1c1c1a; --mut:#6b6b66; --line:#d9d9d4; --acc:#2a5bd7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --card:#1f1f1e; --ink:#ececea; --mut:#9a9a94; --line:#33332f; --acc:#7aa2ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:17px; font-weight:600; }
+  header p { margin:4px 0 0; color:var(--mut); }
+  main { display:grid; grid-template-columns:340px 1fr; gap:16px; padding:16px 20px; max-width:1200px; margin:0 auto; }
+  @media (max-width: 820px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); font-weight:600; }
+  label { display:block; margin:10px 0 4px; font-size:13px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row > * { flex:1; }
+  select, input[type=file], button { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); font:inherit; }
+  button { cursor:pointer; }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input[type=range] { width:100%; }
+  input[type=color] { width:100%; height:34px; padding:2px; border:1px solid var(--line); border-radius:6px; background:var(--card); }
+  .val { float:right; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .pal { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  input[type=number] { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); font:inherit; }
+  .pal div { text-align:center; font-size:11px; color:var(--mut); }
+  #drop { border:2px dashed var(--line); border-radius:8px; padding:14px; text-align:center; color:var(--mut); margin-bottom:8px; }
+  #drop.over { border-color:var(--acc); color:var(--acc); }
+  canvas { width:100%; image-rendering:pixelated; background:#000; border-radius:6px; display:block; }
+  #logoCv { width:auto; max-width:100%; }
+  .stats { display:flex; flex-wrap:wrap; gap:6px 16px; color:var(--mut); margin:10px 0 0; font-size:13px; }
+  .stats b { color:var(--ink); font-weight:600; }
+  .dl { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+  .hint { color:var(--mut); font-size:12.5px; margin:8px 0 0; }
+  code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .hide { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Imagen a ROM VGA para Tiny Tapeout</h1>
+  <p>Carga una imagen, ajusta el filtro, mira cómo saldrá en pantalla y descarga <code>bitmap_rom.v</code>, <code>palette.v</code> y <code>project.v</code> (imagen estática y centrada).</p>
+</header>
 
+<main>
+  <section>
+    <div class="card">
+      <h2>1. Imagen</h2>
+      <div id="drop">Arrastra una imagen aquí, pega con Ctrl+V o elige un archivo</div>
+      <input type="file" id="file" accept="image/*">
+      <div class="row" style="margin-top:10px">
+        <button id="presetA" type="button">A: 128×128 B/N</button>
+        <button id="presetB" type="button">B: 64×64 color</button>
+      </div>
+      <div id="sizeBox">
+        <label>Tamaño del logo
+          <select id="size"><option value="128">128 × 128</option><option value="64">64 × 64</option></select>
+        </label>
+      </div>
+      <label>Modo de color
+        <select id="mode">
+          <option value="mono">1 bit (un color sobre negro)</option>
+          <option value="pal4">2 bits (paleta de 4 colores)</option>
+          <option value="pal8" class="xo">3 bits (paleta de 8) · experimental</option>
+          <option value="pal16" class="xo">4 bits (paleta de 16) · experimental</option>
+          <option value="rgb222" class="xo">6 bits (RGB 2-2-2, 64 colores) · experimental</option>
+        </select>
+      </label>
+      <label style="margin-top:12px"><input type="checkbox" id="exp"> Modo experimental (no cabe en una tile, solo para VGA Playground)</label>
+      <div id="expBox" class="hide">
+        <div class="row">
+          <label>Ancho<input type="number" id="W" min="1" max="640" value="320"></label>
+          <label>Alto<input type="number" id="H" min="1" max="480" value="240"></label>
+        </div>
+        <label>Resolución rápida
+          <select id="quick">
+            <option value="">—</option>
+            <option value="160x120">160 × 120</option>
+            <option value="256x256">256 × 256</option>
+            <option value="320x240" selected>320 × 240</option>
+            <option value="400x300">400 × 300</option>
+            <option value="480x480">480 × 480</option>
+            <option value="640x480">640 × 480 (pantalla completa)</option>
+          </select>
+        </label>
+        <div class="row">
+          <label>DISPLAY_WIDTH<input type="number" id="dW" min="1" max="640" value="640"></label>
+          <label>DISPLAY_HEIGHT<input type="number" id="dH" min="1" max="480" value="480"></label>
+        </div>
+        <div class="row">
+          <label>X (vacío = centrado)<input type="number" id="offX" min="0" max="639" placeholder="auto"></label>
+          <label>Y (vacío = centrado)<input type="number" id="offY" min="0" max="479" placeholder="auto"></label>
+        </div>
+        <p class="hint">El <code>hvsync_generator.v</code> sigue siendo 640×480. <code>DISPLAY_WIDTH/HEIGHT</code> solo cambian el centrado y recortan lo que se dibuja.</p>
+      </div>
+      <div class="row">
+        <label>Ajuste
+          <select id="fit"><option value="contain">Contener</option><option value="cover">Rellenar</option><option value="stretch">Estirar</option></select>
+        </label>
+        <label>Fondo
+          <select id="bg"><option value="#000000">Negro</option><option value="#ffffff">Blanco</option></select>
+        </label>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>2. Filtro</h2>
+      <label>Brillo <span class="val" id="brV">0</span></label>
+      <input type="range" id="br" min="-100" max="100" value="0">
+      <label>Contraste <span class="val" id="coV">0</span></label>
+      <input type="range" id="co" min="-100" max="100" value="0">
+      <div id="thrBox">
+        <label>Umbral <span class="val" id="thV">128</span></label>
+        <input type="range" id="thr" min="0" max="255" value="128">
+      </div>
+      <label>Tramado (dithering)
+        <select id="dither">
+          <option value="none">Ninguno</option>
+          <option value="fs">Floyd–Steinberg</option>
+          <option value="atk">Atkinson</option>
+          <option value="bayer">Bayer 4×4</option>
+        </select>
+      </label>
+      <div id="invBox"><label><input type="checkbox" id="inv"> Invertir</label></div>
+      <div id="fgBox">
+        <label>Color del logo</label>
+        <input type="color" id="fg" value="#ffffff">
+      </div>
+      <div id="palBox" class="hide">
+        <label>Paleta</label>
+        <div class="pal" id="palGrid"></div>
+        <button id="auto" type="button" style="margin-top:8px">Paleta automática desde la imagen</button>
+        <p class="hint">Cada canal solo admite 00, 55, AA o FF (2 bits por canal). Los colores se ajustan solos.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>Vista previa (pantalla VGA 640×480)</h2>
+      <canvas id="screen" width="640" height="480"></canvas>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Logo procesado (con zoom)</h2>
+      <canvas id="logoCv" width="128" height="128" style="width:384px"></canvas>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>3. Descargar</h2>
+      <div class="dl">
+        <button class="primary" id="dRom" disabled>bitmap_rom.v</button>
+        <button class="primary" id="dPal" disabled>palette.v</button>
+        <button class="primary" id="dPrj" disabled>project.v</button>
+        <button id="dAll" disabled>Descargar todos</button>
+      </div>
+      <p class="hint" id="note"></p>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SCREEN_W = 640, SCREEN_H = 480;
+let img = null;
+let state = null;   // resultado del ultimo render (para generar archivos al descargar)
+
+const snap = v => Math.max(0, Math.min(3, Math.round(v / 85))) * 85;
+const hex2 = v => v.toString(16).padStart(2, "0");
+const toHex = c => "#" + c.map(hex2).join("");
+const fromHex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const snapRgb = c => c.map(snap);
+const clamp255 = v => v < 0 ? 0 : v > 255 ? 255 : v;
+const bits6 = c => c.map(v => (v / 85).toString(2).padStart(2, "0")).join("");
+const lumOf = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+const clampInt = (v, lo, hi, d) => { v = parseInt(v, 10); return isNaN(v) ? d : Math.max(lo, Math.min(hi, v)); };
+const log2 = n => Math.log2(n);
+
+const BPP = { mono: 1, pal4: 2, pal8: 3, pal16: 4, rgb222: 6 };
+const NPAL = { pal4: 4, pal8: 8, pal16: 16 };
+const DEF_PAL = ["#000000", "#ff5555", "#55aaff", "#ffffff", "#55ff55", "#ffaa00", "#aa55ff", "#555555",
+                 "#aa0000", "#0055aa", "#00aa55", "#ffff55", "#aaaaaa", "#ff55ff", "#55ffff", "#005500"];
+let palCache = DEF_PAL.slice();
+
+// ---------- configuracion ----------
+function cfg() {
+  const exp = $("exp").checked;
+  let mode = $("mode").value;
+  if (!exp && mode !== "mono" && mode !== "pal4") mode = "pal4";
+  let W, H;
+  if (exp) { W = clampInt($("W").value, 1, 640, 320); H = clampInt($("H").value, 1, 480, 240); }
+  else W = H = +$("size").value;
+  const offX = $("offX").value === "" ? null : clampInt($("offX").value, 0, 639, 0);
+  const offY = $("offY").value === "" ? null : clampInt($("offY").value, 0, 479, 0);
+  return {
+    exp, mode, W, H, bpp: BPP[mode], n: NPAL[mode] || 0,
+    dispW: exp ? clampInt($("dW").value, 1, 640, 640) : 640,
+    dispH: exp ? clampInt($("dH").value, 1, 480, 480) : 480,
+    offX: exp ? offX : null, offY: exp ? offY : null
+  };
+}
+
+// ---------- carga de imagen ----------
+function loadFile(f) {
+  if (!f || !f.type.startsWith("image/")) return;
+  const url = URL.createObjectURL(f);
+  const im = new Image();
+  im.onload = () => { img = im; URL.revokeObjectURL(url); render(); };
+  im.src = url;
+}
+$("file").addEventListener("change", e => loadFile(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+document.addEventListener("drop", e => loadFile(e.dataTransfer.files[0]));
+document.addEventListener("paste", e => {
+  for (const it of e.clipboardData.items) if (it.type.startsWith("image/")) loadFile(it.getAsFile());
+});
+
+// ---------- paleta ----------
+function buildPalUi(n) {
+  const grid = $("palGrid");
+  grid.innerHTML = "";
+  for (let i = 0; i < n; i++) {
+    const d = document.createElement("div");
+    const inp = document.createElement("input");
+    inp.type = "color"; inp.className = "pc"; inp.value = palCache[i];
+    inp.addEventListener("input", () => { inp.value = toHex(snapRgb(fromHex(inp.value))); palCache[i] = inp.value; render(); });
+    d.appendChild(inp); d.appendChild(document.createTextNode(i));
+    grid.appendChild(d);
+  }
+}
+function palette() { return [...document.querySelectorAll(".pc")].map(i => snapRgb(fromHex(i.value))); }
+$("fg").addEventListener("input", () => { $("fg").value = toHex(snapRgb(fromHex($("fg").value))); render(); });
+
+// ---------- controles ----------
+["size", "mode", "fit", "bg", "dither", "inv", "exp", "W", "H", "dW", "dH", "offX", "offY"].forEach(id =>
+  $(id).addEventListener("input", () => { syncUi(); render(); }));
+[["br", "brV"], ["co", "coV"], ["thr", "thV"]].forEach(([a, b]) => $(a).addEventListener("input", () => { $(b).textContent = $(a).value; render(); }));
+$("quick").addEventListener("input", () => {
+  const v = $("quick").value; if (!v) return;
+  const [w, h] = v.split("x"); $("W").value = w; $("H").value = h; render();
+});
+$("presetA").onclick = () => { $("exp").checked = false; $("size").value = "128"; $("mode").value = "mono"; syncUi(); render(); };
+$("presetB").onclick = () => { $("exp").checked = false; $("size").value = "64"; $("mode").value = "pal4"; syncUi(); render(); if (img) autoPalette(); };
+$("auto").onclick = () => autoPalette();
+
+let lastN = -1;
+function syncUi() {
+  const c = cfg();
+  const mono = c.mode === "mono", rgb = c.mode === "rgb222";
+  $("sizeBox").classList.toggle("hide", c.exp);
+  $("expBox").classList.toggle("hide", !c.exp);
+  document.querySelectorAll("#mode .xo").forEach(o => o.disabled = !c.exp);
+  if ($("mode").value !== c.mode) $("mode").value = c.mode;
+  $("thrBox").classList.toggle("hide", !mono);
+  $("invBox").classList.toggle("hide", !mono);
+  $("fgBox").classList.toggle("hide", !mono);
+  $("palBox").classList.toggle("hide", mono || rgb);
+  if (c.n && c.n !== lastN) { buildPalUi(c.n); lastN = c.n; }
+}
+
+// ---------- procesamiento ----------
+function getWork(W, H) {
+  const cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const g = cv.getContext("2d", { willReadFrequently: true });
+  g.fillStyle = $("bg").value;
+  g.fillRect(0, 0, W, H);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  const iw = img.naturalWidth, ih = img.naturalHeight, fit = $("fit").value;
+  let dx = 0, dy = 0, dw = W, dh = H;
+  if (fit !== "stretch") {
+    const k = fit === "contain" ? Math.min(W / iw, H / ih) : Math.max(W / iw, H / ih);
+    dw = iw * k; dh = ih * k; dx = (W - dw) / 2; dy = (H - dh) / 2;
+  }
+  g.drawImage(img, dx, dy, dw, dh);
+  return g.getImageData(0, 0, W, H).data;
+}
+
+function adjusted(data, W, H, C) {
+  const b = +$("br").value * 2.55, c = +$("co").value * 2.55;
+  const f = (259 * (c + 255)) / (255 * (259 - c));
+  const buf = new Float32Array(W * H * C);
+  const inv = $("inv").checked && C === 1;
+  for (let i = 0; i < W * H; i++) {
+    const r = clamp255(f * (data[i * 4] - 128) + 128 + b);
+    const g = clamp255(f * (data[i * 4 + 1] - 128) + 128 + b);
+    const bl = clamp255(f * (data[i * 4 + 2] - 128) + 128 + b);
+    if (C === 1) { const y = 0.299 * r + 0.587 * g + 0.114 * bl; buf[i] = inv ? 255 - y : y; }
+    else { buf[i * 3] = r; buf[i * 3 + 1] = g; buf[i * 3 + 2] = bl; }
+  }
+  return buf;
+}
+
+const KERN = {
+  fs: [[1, 0, 7 / 16], [-1, 1, 3 / 16], [0, 1, 5 / 16], [1, 1, 1 / 16]],
+  atk: [[1, 0, 1 / 8], [2, 0, 1 / 8], [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8], [0, 2, 1 / 8]]
+};
+const B4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+// pal: arreglo de colores, o null para RGB 2-2-2 directo
+function quantize(buf, W, H, C, method, pal, thr) {
+  const idx = new Uint16Array(W * H);
+  const kern = KERN[method];
+  const tc = [0, 0, 0];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const o = (y * W + x) * C;
+    const bay = method === "bayer" ? ((B4[(y & 3) * 4 + (x & 3)] + 0.5) / 16 - 0.5) : 0;
+    let i;
+    if (C === 1) {
+      i = buf[o] >= thr + bay * 255 ? 1 : 0;
+      tc[0] = i ? 255 : 0;
+    } else if (pal) {
+      const r = buf[o] + bay * 64, g = buf[o + 1] + bay * 64, b = buf[o + 2] + bay * 64;
+      let best = 1e12; i = 0;
+      for (let k = 0; k < pal.length; k++) {
+        const d = (r - pal[k][0]) ** 2 + (g - pal[k][1]) ** 2 + (b - pal[k][2]) ** 2;
+        if (d < best) { best = d; i = k; }
+      }
+      tc[0] = pal[i][0]; tc[1] = pal[i][1]; tc[2] = pal[i][2];
+    } else {
+      const r = Math.round(clamp255(buf[o] + bay * 64) / 85), g = Math.round(clamp255(buf[o + 1] + bay * 64) / 85), b = Math.round(clamp255(buf[o + 2] + bay * 64) / 85);
+      i = (r << 4) | (g << 2) | b;
+      tc[0] = r * 85; tc[1] = g * 85; tc[2] = b * 85;
+    }
+    idx[y * W + x] = i;
+    if (kern) for (let c = 0; c < C; c++) {
+      const err = buf[o + c] - tc[c];
+      for (const [dx, dy, w] of kern) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < W && ny < H) buf[(ny * W + nx) * C + c] += err * w;
+      }
+    }
+  }
+  return idx;
+}
+
+function autoPalette() {
+  if (!img) return;
+  const c = cfg();
+  const n = c.n || 4, W = c.W, H = c.H;
+  const buf = adjusted(getWork(W, H), W, H, 3);
+  const np = W * H, lum = i => 0.299 * buf[i * 3] + 0.587 * buf[i * 3 + 1] + 0.114 * buf[i * 3 + 2];
+  const order = [...Array(np).keys()].sort((a, b) => lum(a) - lum(b));
+  let cen = [...Array(n).keys()].map(q => { const p = order[Math.min(np - 1, Math.floor(q / (n - 1) * (np - 1)))]; return [buf[p * 3], buf[p * 3 + 1], buf[p * 3 + 2]]; });
+  for (let it = 0; it < 12; it++) {
+    const sum = cen.map(() => [0, 0, 0, 0]);
+    for (let p = 0; p < np; p++) {
+      let best = 1e12, k = 0;
+      for (let j = 0; j < n; j++) {
+        const d = (buf[p * 3] - cen[j][0]) ** 2 + (buf[p * 3 + 1] - cen[j][1]) ** 2 + (buf[p * 3 + 2] - cen[j][2]) ** 2;
+        if (d < best) { best = d; k = j; }
+      }
+      sum[k][0] += buf[p * 3]; sum[k][1] += buf[p * 3 + 1]; sum[k][2] += buf[p * 3 + 2]; sum[k][3]++;
+    }
+    cen = cen.map((c0, j) => sum[j][3] ? [sum[j][0] / sum[j][3], sum[j][1] / sum[j][3], sum[j][2] / sum[j][3]] : c0);
+  }
+  cen = cen.map(snapRgb).sort((a, b) => lumOf(a) - lumOf(b));
+  cen.forEach((col, i) => palCache[i] = toHex(col));
+  buildPalUi(n); lastN = n;
+  render();
+}
+
+// ---------- generacion de Verilog: ROM ----------
+// ROM "apta para tile": cuadrada 64/128, 1 o 2 bits, direccionada por concatenacion
+function genRomTile(idx, S, mode) {
+  const B = log2(S);
+  const bpp = mode === "mono" ? 1 : 2;
+  const perByte = 8 / bpp;
+  const n = S * S / perByte;
+  const bytes = new Uint8Array(n);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const v = idx[y * S + x];
+    const bi = y * (S / perByte) + (x >> log2(perByte));
+    bytes[bi] |= v << ((x & (perByte - 1)) * bpp);
+  }
+  let s = `/*\n * Generado con img2rom.html\n * Logo ${S}x${S}, ${bpp} bit(s) por pixel, ${n} bytes\n */\n\n\`default_nettype none\n\n`;
+  s += `module bitmap_rom (\n    input wire [${B - 1}:0] x,\n    input wire [${B - 1}:0] y,\n    output wire ${mode === "mono" ? "" : "[1:0] "}pixel\n);\n\n`;
+  s += `  reg [7:0] mem[${n - 1}:0];\n  initial begin\n`;
+  for (let i = 0; i < n; i++) s += `    mem[${i}] = 8'h${hex2(bytes[i])};\n`;
+  s += `  end\n\n`;
+  if (mode === "mono") {
+    s += `  wire [${B + B - 4}:0] addr = {y[${B - 1}:0], x[${B - 1}:3]};\n  assign pixel = mem[addr][x[2:0]];\n`;
+  } else {
+    s += `  wire [${B + B - 3}:0] addr = {y[${B - 1}:0], x[${B - 1}:2]};\n  wire [7:0] data = mem[addr];\n  wire [2:0] shift = {x[1:0], 1'b0};\n  wire [7:0] shifted = data >> shift;\n  assign pixel = shifted[1:0];\n`;
+  }
+  s += `\nendmodule\n`;
+  return { text: s, bytes: n };
+}
+
+// ROM experimental: cualquier ancho/alto y 1..6 bits. Palabras de 32 bits (el simulador
+// del playground no soporta arreglos de vectores anchos). Cada pixel ocupa un campo de
+// SB bits (potencia de 2) y cada fila empieza en palabra nueva, asi no hay divisiones.
+function genRomRows(idx, W, H, bpp) {
+  const SB = bpp <= 1 ? 1 : bpp <= 2 ? 2 : bpp <= 4 ? 4 : 8;
+  const PPW = 32 / SB, PSH = log2(PPW);
+  const WPR = Math.ceil(W / PPW), N = WPR * H;
+  const AW = Math.max(1, Math.ceil(Math.log2(N + 1)));
+  let s = `/*\n * Generado con img2rom.html (modo experimental)\n * Logo ${W}x${H}, ${bpp} bit(s) por pixel, ${N} palabras de 32 bits\n * NO cabe en una tile: solo para simular en VGA Playground.\n */\n\n\`default_nettype none\n\n`;
+  s += `module bitmap_rom (\n    input wire [9:0] x,\n    input wire [9:0] y,\n    output wire [${bpp - 1}:0] pixel\n);\n\n`;
+  s += `  localparam LOGO_WIDTH  = ${W};\n  localparam LOGO_HEIGHT = ${H};\n  localparam WORDS_PER_ROW = ${WPR};  // ${PPW} pixeles por palabra, ${SB} bit(s) por campo\n\n`;
+  s += `  reg [31:0] mem[${N - 1}:0];\n  initial begin\n`;
+  for (let y = 0; y < H; y++) {
+    for (let w = 0; w < WPR; w++) {
+      let v = 0;
+      for (let k = 0; k < PPW; k++) {
+        const x = w * PPW + k;
+        if (x < W) v = (v | (idx[y * W + x] << (k * SB))) >>> 0;
+      }
+      s += `    mem[${y * WPR + w}] = 32'h${v.toString(16).padStart(8, "0")};\n`;
+    }
+  }
+  s += `  end\n\n`;
+  s += `  wire in_range = (x < LOGO_WIDTH) && (y < LOGO_HEIGHT);\n`;
+  s += `  wire [${AW - 1}:0] addr = in_range ? (y * WORDS_PER_ROW + x[9:${PSH}]) : ${AW}'d0;\n`;
+  s += `  wire [31:0] word = mem[addr];\n`;
+  s += `  wire [${PSH - 1 < 0 ? 0 : PSH - 1}:0] slot = x[${PSH - 1 < 0 ? 0 : PSH - 1}:0];\n`;
+  s += `  wire [5:0] shift = slot * ${SB};\n`;
+  s += `  wire [31:0] shifted = word >> shift;\n`;
+  s += `  assign pixel = shifted[${bpp - 1}:0];\n\nendmodule\n`;
+  return { text: s, bytes: Math.ceil(W * H * bpp / 8), words: N };
+}
+
+function genPalette(pal, bpp) {
+  const n = pal.length;
+  let s = `/*\n * Generado con img2rom.html\n */\n\n\`default_nettype none\n\nmodule palette (\n    input  wire [${bpp - 1}:0] color_index,\n    output wire [5:0] rrggbb\n);\n\n  reg [5:0] palette[${n - 1}:0];\n\n  initial begin\n`;
+  pal.forEach((c, i) => s += `    palette[${i}] = 6'b${bits6(c)};  // ${toHex(c)}\n`);
+  s += `  end\n\n  assign rrggbb = palette[color_index];\n\nendmodule\n`;
+  return s;
+}
+
+// ---------- generacion de Verilog: project.v ----------
+const PORTS = `    input  wire [7:0] ui_in,    // Dedicated inputs
+    output wire [7:0] uo_out,   // Dedicated outputs
+    input  wire [7:0] uio_in,   // IOs: Input path
+    output wire [7:0] uio_out,  // IOs: Output path
+    output wire [7:0] uio_oe,   // IOs: Enable path (active high: 0=input, 1=output)
+    input  wire       ena,      // always 1 when the design is powered, so you can ignore it
+    input  wire       clk,      // clock
+    input  wire       rst_n     // reset_n - low to reset`;
+const COMMON = `  // VGA signals
+  wire hsync;
+  wire vsync;
+  reg [1:0] R;
+  reg [1:0] G;
+  reg [1:0] B;
+  wire video_active;
+  wire [9:0] pix_x;
+  wire [9:0] pix_y;
+
+  // TinyVGA PMOD
+  assign uo_out  = {hsync, B[0], G[0], R[0], vsync, B[1], G[1], R[1]};
+
+  // Unused outputs assigned to 0.
+  assign uio_out = 0;
+  assign uio_oe  = 0;
+
+  // Suppress unused signals warning
+  wire _unused_ok = &{ena, ui_in, uio_in};
+
+  hvsync_generator vga_sync_gen (
+      .clk(clk),
+      .reset(~rst_n),
+      .hsync(hsync),
+      .vsync(vsync),
+      .display_on(video_active),
+      .hpos(pix_x),
+      .vpos(pix_y)
+  );
+
+`;
+
+function colorBlock(c, fg, xyW) {
+  // devuelve {decl, color} segun modo; xyW es el trozo de conexion x/y
+  const conn = `      .x(${xyW.x}),\n      .y(${xyW.y}),\n`;
+  if (c.mode === "mono")
+    return `  wire pixel_value;\n  wire [5:0] color = pixel_value ? 6'b${bits6(fg)} : 6'b000000;\n\n  bitmap_rom rom1 (\n${conn}      .pixel(pixel_value)\n  );\n\n`;
+  if (c.mode === "rgb222")
+    return `  wire [5:0] color;\n\n  bitmap_rom rom1 (\n${conn}      .pixel(color)\n  );\n\n`;
+  return `  wire [${c.bpp - 1}:0] pixel_index;\n  wire [5:0] color;\n\n  bitmap_rom rom1 (\n${conn}      .pixel(pixel_index)\n  );\n\n  palette palette_inst (\n      .color_index(pixel_index),\n      .rrggbb(color)\n  );\n\n`;
+}
+
+function rgbBlock(cond) {
+  return `  // RGB output logic\n  always @(posedge clk) begin\n    if (~rst_n) begin\n      R <= 0;\n      G <= 0;\n      B <= 0;\n    end else begin\n      R <= 0;\n      G <= 0;\n      B <= 0;\n      if (${cond}) begin\n        R <= color[5:4];\n        G <= color[3:2];\n        B <= color[1:0];\n      end\n    end\n  end\n\nendmodule\n`;
+}
+
+function genProjectTile(c, fg) {
+  const S = c.W, B = log2(S), left = (SCREEN_W - S) / 2, top = (SCREEN_H - S) / 2;
+  let s = `/*\n * Generado con img2rom.html\n * Imagen estatica ${S}x${S} centrada en pantalla VGA 640x480\n */\n\n\`default_nettype none\n\n`;
+  s += `module tt_um_vga_example (\n${PORTS}\n);\n\n${COMMON}`;
+  s += `  // Posicion fija: imagen centrada\n  wire [9:0] x = pix_x - 10'd${left};\n  wire [9:0] y = pix_y - 10'd${top};\n  wire logo_area = (x[9:${B}] == ${10 - B}'d0) && (y[9:${B}] == ${10 - B}'d0);\n\n`;
+  s += colorBlock(c, fg, { x: `x[${B - 1}:0]`, y: `y[${B - 1}:0]` });
+  return s + rgbBlock("video_active && logo_area");
+}
+
+function genProjectExp(c, fg) {
+  let s = `/*\n * Generado con img2rom.html (modo experimental)\n * Imagen estatica ${c.W}x${c.H}, ${c.bpp} bit(s) por pixel.\n * NO cabe en una tile: solo para simular en VGA Playground.\n */\n\n\`default_nettype none\n\n`;
+  s += `// verilator lint_off WIDTH\n\nparameter DISPLAY_WIDTH = ${c.dispW};  // VGA display width\nparameter DISPLAY_HEIGHT = ${c.dispH};  // VGA display height\n\n`;
+  s += `module tt_um_vga_example (\n${PORTS}\n);\n\n`;
+  s += `  localparam LOGO_WIDTH  = ${c.W};\n  localparam LOGO_HEIGHT = ${c.H};\n`;
+  s += `  localparam LOGO_LEFT   = ${c.offX === null ? "(DISPLAY_WIDTH - LOGO_WIDTH) / 2" : c.offX};\n`;
+  s += `  localparam LOGO_TOP    = ${c.offY === null ? "(DISPLAY_HEIGHT - LOGO_HEIGHT) / 2" : c.offY};\n\n`;
+  s += COMMON;
+  s += `  // Posicion fija\n  wire [9:0] logo_left = LOGO_LEFT;\n  wire [9:0] logo_top  = LOGO_TOP;\n  wire [9:0] x = pix_x - logo_left;\n  wire [9:0] y = pix_y - logo_top;\n  wire in_display = (pix_x < DISPLAY_WIDTH) && (pix_y < DISPLAY_HEIGHT);\n  wire logo_area  = (x < LOGO_WIDTH) && (y < LOGO_HEIGHT);\n\n`;
+  s += colorBlock(c, fg, { x: "x", y: "y" });
+  return s + rgbBlock("video_active && in_display && logo_area");
+}
+
+function buildOutputs() {
+  if (!state) return null;
+  const { c, idx, pal, fg } = state;
+  const mono = c.mode === "mono", rgb = c.mode === "rgb222";
+  const rom = c.exp ? genRomRows(idx, c.W, c.H, c.bpp) : genRomTile(idx, c.W, c.mode);
+  return {
+    rom: rom.text, bytes: rom.bytes,
+    pal: (mono || rgb) ? "" : genPalette(pal, c.bpp),
+    prj: c.exp ? genProjectExp(c, fg) : genProjectTile(c, fg)
+  };
+}
+
+// ---------- render ----------
+function render() {
+  const c = cfg(), mono = c.mode === "mono", rgb = c.mode === "rgb222";
+  const scr = $("screen"), sg = scr.getContext("2d");
+  sg.fillStyle = "#000"; sg.fillRect(0, 0, SCREEN_W, SCREEN_H);
+  const lc = $("logoCv"); lc.width = c.W; lc.height = c.H;
+  const lg = lc.getContext("2d");
+  const setBtn = on => ["dRom", "dPal", "dPrj", "dAll"].forEach(id => $(id).disabled = !on);
+  if (!img) { state = null; setBtn(false); $("stats").innerHTML = "Carga una imagen para empezar."; lg.fillStyle = "#000"; lg.fillRect(0, 0, c.W, c.H); return; }
+
+  const C = mono ? 1 : 3;
+  const pal = (mono || rgb) ? null : palette();
+  const buf = adjusted(getWork(c.W, c.H), c.W, c.H, C);
+  const idx = quantize(buf, c.W, c.H, C, $("dither").value, pal, +$("thr").value);
+
+  const fg = snapRgb(fromHex($("fg").value));
+  const colors = mono ? [[0, 0, 0], fg] : pal;
+  const im = lg.createImageData(c.W, c.H);
+  for (let i = 0; i < c.W * c.H; i++) {
+    const v = idx[i];
+    const col = rgb ? [((v >> 4) & 3) * 85, ((v >> 2) & 3) * 85, (v & 3) * 85] : colors[v];
+    im.data[i * 4] = col[0]; im.data[i * 4 + 1] = col[1]; im.data[i * 4 + 2] = col[2]; im.data[i * 4 + 3] = 255;
+  }
+  lg.putImageData(im, 0, 0);
+
+  const left = c.offX === null ? Math.trunc((c.dispW - c.W) / 2) : c.offX;
+  const top = c.offY === null ? Math.trunc((c.dispH - c.H) / 2) : c.offY;
+  sg.save();
+  sg.beginPath(); sg.rect(0, 0, c.dispW, c.dispH); sg.clip();
+  sg.imageSmoothingEnabled = false;
+  sg.drawImage(lc, left, top);
+  sg.restore();
+  if (c.dispW < SCREEN_W || c.dispH < SCREEN_H) { sg.strokeStyle = "#444"; sg.strokeRect(0.5, 0.5, c.dispW - 1, c.dispH - 1); }
+  lc.style.width = Math.min(Math.max(c.W, Math.min(512, c.W * Math.max(1, Math.floor(384 / Math.max(c.W, c.H))))), 640) + "px";
+
+  state = { c, idx, pal, fg };
+  const bytes = Math.ceil(c.W * c.H * c.bpp / 8);
+  const warn = c.exp ? `<span><b style="color:#c0392b">Experimental: no cabe en 1 tile</b></span>` : "";
+  $("stats").innerHTML = `<span>Logo: <b>${c.W}×${c.H}</b></span><span>ROM: <b>${bytes.toLocaleString()} bytes</b></span><span>Posicion: <b>(${left}, ${top})</b></span><span>Bits/pixel: <b>${c.bpp}</b></span>${warn}`;
+  setBtn(true);
+  $("dPal").disabled = mono || rgb;
+  $("note").innerHTML = c.exp
+    ? `Modo experimental: pega <code>project.v</code>, <code>bitmap_rom.v</code>${(mono || rgb) ? "" : " y <code>palette.v</code>"} en VGA Playground junto con el <code>hvsync_generator.v</code> de siempre. El ROM usa palabras de 32 bits (el simulador del playground no acepta vectores más anchos). Un 640×480 genera decenas de miles de líneas: si tarda, baja la resolución.`
+    : mono
+      ? `Modo 1 bit: no se usa <code>palette.v</code>. Quitalo de <code>source_files</code> en <code>info.yaml</code> o dejalo, no estorba.`
+      : `Modo 4 colores: en <code>info.yaml</code> deja <code>project.v</code>, <code>hvsync_generator.v</code>, <code>palette.v</code> y <code>bitmap_rom.v</code>. <code>hvsync_generator.v</code> no cambia.`;
+}
+
+// ---------- descargas ----------
+function save(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+$("dRom").onclick = () => save("bitmap_rom.v", buildOutputs().rom);
+$("dPal").onclick = () => save("palette.v", buildOutputs().pal);
+$("dPrj").onclick = () => save("project.v", buildOutputs().prj);
+$("dAll").onclick = () => {
+  const o = buildOutputs();
+  save("bitmap_rom.v", o.rom);
+  setTimeout(() => save("project.v", o.prj), 250);
+  if (o.pal) setTimeout(() => save("palette.v", o.pal), 500);
+};
+
+syncUi();
+render();
+</script>
+</body>
+</html>
